@@ -1,10 +1,163 @@
-Kalibrate, or kal, can scan for GSM base stations in a given frequency band and
-can use those GSM base stations to calculate the local oscillator frequency
-offset.
+Kalibrate
+=========
 
-See http://thre.at/kalibrate 
+Kalibrate, or *kal*, can scan for GSM base stations in a given frequency band and can
+use those GSM base stations to calculate the local oscillator frequency offset.
+
+
+Credits & Links
+===============
 
 Copyright (c) 2010, Joshua Lackey (jl@thre.at)
 
-modified for use with rtl-sdr devices,
-Copyright (c) 2012, Steve Markgraf (steve@steve-m.de)
+modified for use with rtl-sdr devices, Copyright (c) 2012, Steve Markgraf
+(steve@steve-m.de)
+
+Additional documentation (in this file) Copyright (c) 2019, Matthew Gates.
+
+[Original website](http://thre.at/kalibrate) is gone at time
+of writing, although content can still be seen on the [Wayback
+Machine](https://web.archive.org/web/20131226204943/http://thre.at/kalibrate).
+
+This repo was forked from [Steve-M's git repo](https://github.com/steve-m/kalibrate-rtl).
+
+Build
+-----
+
+1. Install pre-requisites:
+   - [librtlsdr](https://github.com/steve-m/librtlsdr)
+   - fftw >= v3.0 (Fedora package fftw-devel)
+   - Developer tools (C / C++ compiler, autoconf etc.)
+
+1. Clone with git: `git clone https://github.com/matthewg42/kalibrate-rtl.git`
+
+2. Run bootstrap: `./bootstrap`
+
+3. If librtlsdr was installed from source, and put in `/usr/local`, you must set
+   a couple of environment variables so the configure script can select the currect
+   compiler/linker flags:
+
+```
+    export LIBRTLSDR_CFLAGS=-I/usr/local/include
+    export LIBRTLSDR_LIBS='-L/usr/local/lib -lrtlsdr'
+```
+
+4. Run configure: `./configure`
+
+5. Run make: `make`
+
+The binary `kal` will be created in the `src` directory.
+
+Usage
+-----
+
+1. Find out what GSM bands are used in your location. E.g. in the UK, the 900 and 1800
+   bands are used.
+
+2. Plug in your RTLSDR device & scan a GSM band for your location. Wait until you have
+   a couple of channels pop up, and then quit with CTRL-C:
+
+```
+    $ src/kal -s 900
+    Found 1 device(s):
+      0:  Generic RTL2832U OEM
+    
+    Using device 0: Generic RTL2832U OEM
+    Found Rafael Micro R820T tuner
+    Exact sample rate is: 270833.002142 Hz
+    [R82XX] PLL not locked!
+    kal: Scanning for GSM-900 base stations.
+    GSM-900:
+            chan: 28 (940.6MHz - 15.419kHz) power: 265076.60
+            chan: 38 (942.6MHz - 15.763kHz) power: 39069.99
+            chan: 40 (943.0MHz - 15.671kHz) power: 38164.61
+    ^C
+```
+
+3. Pick and channel and run with the `-c` option:
+
+```
+    $ src/kal -c 28
+    Found 1 device(s):
+      0:  Generic RTL2832U OEM
+    
+    Using device 0: Generic RTL2832U OEM
+    Found Rafael Micro R820T tuner
+    Exact sample rate is: 270833.002142 Hz
+    [R82XX] PLL not locked!
+    kal: Calculating clock frequency offset.
+    Using GSM-900 channel 28 (940.6MHz)
+    average         [min, max]      (range, stddev)
+    - 15.339kHz             [-15345, -15331]        (13, 3.242652)
+    overruns: 0
+    not found: 0
+    average absolute error: 16.308 ppm
+```
+
+Use the ppm error value with `gqrx` and other apps to get more accurate tuning.
+
+Background (copied from the deprecated web-site)
+------------------------------------------------
+
+The USRP1, similar to a number of devices, has a built-in oscillator which is only
+guaranteed accurate to within 20 parts per million (ppm). (Although in practice the USRP
+oscillator is normally closer to 3ppm.) This is sufficient for a number of purposes,
+but not for others. Fortunately, the USRP also supports an external oscillator. For
+example, the Clock Tamer, the KSP 52MHz and the FA-SY 1 are all accurate clocks that
+work well with the USRP.
+
+Normally, these external clocks must be calibrated to ensure they are set as accurately
+as possible. An oscilloscope is probably the best way to determine the accuracy of
+these clocks. However a good oscilloscope is expensive and not everyone has access
+to one. There are other ways to calibrate these devices -- the FA-SY 1 documentation
+discusses using the WWV time signals. Similarly, GSM base stations are required to be
+accurate to within 0.05ppm and so they can also provide an accurate reference clock.
+
+If you own a USRP daughterboard that covers the GSM frequencies in your area, using
+a GSM base station is a particularly convenient.
+
+A base station transmits a frequency correction burst on the Frequency Correction
+CHannel (FCCH) in regular positions. The FCCH repeats every 51 TDMA frames and the
+frequency correction burst is located in timeslot 0 of frames 0, 10, 20, 30, and 40.
+
+A frequency correction burst consists of a certain bit pattern which, after modulation,
+is a sine wave with frequency one quarter that of the GSM bit rate. i.e., (1625000 / 6) /
+4 = 67708.3 Hz. By searching a channel for this pure tone, a mobile station can determine
+its clock offset by determining how far away from 67708.3Hz the received frequency is.
+
+There are many ways which a pure tone can be identified. For example, one can capture
+a burst of data and then examine it with a Fourier transformation to determine if most
+of the power in the signal is at a certain frequency. Alternatively, one can define
+a band-pass filter at 67708.3 Hz and then compare the power of the signal before and
+after it passes through the filter. However, both of these methods have drawbacks. The
+FFT method requires significant resources and cannot easily detect the frequency
+correction burst edge. The filter method either isn't accurate or cannot detect larger
+offsets. Multiple filters can be used, but that requires significant resources.
+
+kal uses a hybrid of the FFT and filter methods. The filter kal uses is an adaptive
+filter as described in the paper:
+
+G. Narendra Varma, Usha Sahu, G. Prabhu Charan, Robust Frequency Burst Detection
+Algorithm for GSM/GPRS.  An Adaptive Line Equalizer (ALE) attempts to predict the input
+signal by adapting its filter coefficients. The prediction is compared with the actual
+signal and the coefficients are adapted so that the error is minimized. If the input
+contains a strong narrow-band signal embedded in wide-band noise, the filter output
+will be a pure sine at the same frequency and almost free of the wide-band noise.
+
+kal applies the ALE to the buffer and calculates the error between the ALE prediction
+and the input signal at each point in the signal. kal then calculates the average of
+all the errors. When the error drops below the average for the length of a frequency
+correction burst, this indicates a detected burst.
+
+Once we have the location of the frequency correction burst, we must determine what
+frequency it is at so we can calculate the offset from 67708.3 Hz. We take the input
+signal corresponding to the low error levels and run that through a FFT. The largest
+peak in the FFT output corresponds to the detected frequency of the frequency correction
+burst. This peak is then used to determine the frequency offset.
+
+Any noise in the system affects the measurements and so kal averages the results a
+number of times before displaying the offset. The range of values as well as the standard
+deviation is displayed so that an estimate of the measurement accuracy can be made.
+
+
+
